@@ -99,6 +99,95 @@ const registerTrabajador = async (req, res) => {
 //  PÁGINA COMERCIAL — Clientes
 // ════════════════════════════════════════════════════
 
+// POST /api/auth/cliente/login  → login de cliente (página comercial)
+const loginCliente = async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Usuario y contraseña son requeridos.' });
+  }
+  try {
+    const { rows } = await pool.query(`
+      SELECT uc.id_usuario_cliente, uc.username, uc.password,
+             c.id_cliente, c.nombres, c.dni, c.correo, c.telefono
+      FROM usuario_cliente uc
+      JOIN cliente c ON c.id_cliente = uc.id_cliente
+      WHERE uc.username = $1
+    `, [username]);
+
+    if (rows.length === 0) return res.status(401).json({ error: 'Credenciales incorrectas.' });
+    const u = rows[0];
+
+    const ok = await bcrypt.compare(password, u.password);
+    if (!ok) return res.status(401).json({ error: 'Credenciales incorrectas.' });
+
+    const usuario = {
+      id: u.id_usuario_cliente,
+      id_cliente: u.id_cliente,
+      nombre: u.nombres,
+      username: u.username,
+      dni: u.dni,
+      correo: u.correo,
+      telefono: u.telefono,
+      tipo: 'cliente',
+    };
+    res.json({ token: signToken(usuario), usuario });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// POST /api/auth/cliente/register  → auto-registro de cliente (página comercial)
+const registerCliente = async (req, res) => {
+  const { nombres, dni, telefono, correo, username, password } = req.body;
+  if (!nombres || !dni || !username || !password) {
+    return res.status(400).json({ error: 'Nombre, DNI, usuario y contraseña son requeridos.' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const dupDni = await client.query('SELECT 1 FROM cliente WHERE dni = $1', [dni]);
+    if (dupDni.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Ya existe un cliente con ese DNI.' });
+    }
+    const dupUser = await client.query('SELECT 1 FROM usuario_cliente WHERE username = $1', [username]);
+    if (dupUser.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Ese nombre de usuario ya está en uso.' });
+    }
+
+    const cli = await client.query(
+      'INSERT INTO cliente (nombres, dni, telefono, correo) VALUES ($1,$2,$3,$4) RETURNING id_cliente',
+      [nombres, dni, telefono || null, correo || null]
+    );
+    const id_cliente = cli.rows[0].id_cliente;
+
+    const hash = await bcrypt.hash(password, 10);
+    await client.query(
+      'INSERT INTO usuario_cliente (username, password, id_cliente) VALUES ($1,$2,$3)',
+      [username, hash, id_cliente]
+    );
+
+    await client.query('COMMIT');
+
+    const usuario = {
+      id_cliente, nombre: nombres, username, dni, correo: correo || null,
+      telefono: telefono || null, tipo: 'cliente',
+    };
+    res.status(201).json({ mensaje: 'Cuenta creada correctamente.', token: signToken(usuario), usuario });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+};
+
 // GET /api/auth/me  → datos del usuario logueado (del token)
 const me = async (req, res) => {
   res.json({ usuario: req.user });
@@ -106,5 +195,6 @@ const me = async (req, res) => {
 
 module.exports = {
   loginTrabajador, registerTrabajador,
+  loginCliente, registerCliente,
   me,
 };

@@ -14,6 +14,7 @@ const reservasRoutes     = require('./routes/reservas.routes');
 const asignacionRoutes   = require('./routes/asignacion.routes');
 const ventasRoutes       = require('./routes/ventas.routes');
 const reportesRoutes     = require('./routes/reportes.routes');
+const clienteRoutes = require('./routes/cliente.routes');
 
 const app = express();
 
@@ -62,6 +63,7 @@ app.use('/api/reservas',     reservasRoutes);
 app.use('/api/asignaciones', asignacionRoutes);
 app.use('/api/ventas',       ventasRoutes);
 app.use('/api/reportes',     reportesRoutes);
+app.use('/api/mi-cuenta', clienteRoutes);
 
 // ─── Health check ────────────────────────────────────────────────────────────
 app.get('/api', (req, res) => {

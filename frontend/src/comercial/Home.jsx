@@ -38,6 +38,7 @@ export default function Home() {
             <Link to="/catalogo" className="hero-btn-primary">
               Ver catálogo de tours <ArrowRight size={17} />
             </Link>
+            <Link to="/ingresar" className="hero-btn-ghost">Crear mi cuenta</Link>
           </div>
           <div className="hero-stats">
             <div><strong>6+</strong><span>Destinos</span></div>
@@ -109,7 +110,9 @@ export default function Home() {
         <div className="cta-box">
           <h2>¿Listo para tu próxima aventura?</h2>
           <p>Crea tu cuenta y mantente al día con nuestras promociones y nuevos destinos.</p>
-          
+          <Link to="/ingresar" className="hero-btn-primary">
+            Crear cuenta gratis <ArrowRight size={17} />
+          </Link>
         </div>
       </section>
 

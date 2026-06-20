@@ -22,18 +22,22 @@ export default function ComercialLayout() {
         <nav className="cml-links">
           <NavLink to="/" end className={({isActive}) => isActive ? 'active' : ''}>Inicio</NavLink>
           <NavLink to="/catalogo" className={({isActive}) => isActive ? 'active' : ''}>Catálogo</NavLink>
+          {esCliente && <NavLink to="/mi-cuenta" className={({isActive}) => isActive ? 'active' : ''}>Mi cuenta</NavLink>}
         </nav>
 
         <div className="cml-actions">
           {esCliente ? (
             <>
-              
+              <Link to="/mi-cuenta" className="cml-user">
+                <div className="cml-avatar">{(usuario?.nombre || 'C')[0].toUpperCase()}</div>
+                <span>{usuario?.nombre?.split(' ')[0]}</span>
+              </Link>
               <button className="cml-btn-ghost" onClick={handleLogout} title="Cerrar sesión">
                 <LogOut size={16} />
               </button>
             </>
           ) : (
-            <Link className="cml-btn-primary">
+            <Link to="/ingresar" className="cml-btn-primary">
               <User size={15} /> Ingresar
             </Link>
           )}
@@ -63,7 +67,7 @@ export default function ComercialLayout() {
             <h4>Enlaces</h4>
             <Link to="/">Inicio</Link>
             <Link to="/catalogo">Catálogo de tours</Link>
-            <Link >Mi cuenta</Link>
+            <Link to="/ingresar">Mi cuenta</Link>
           </div>
           <div>
             <h4>Contacto</h4>
