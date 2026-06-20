@@ -50,6 +50,7 @@ const loginLimiter = rateLimit({
   message: { error: 'Demasiados intentos fallidos. Bloqueado 15 minutos.' }
 });
 app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/cliente/login', loginLimiter);
 
 // ─── Rutas ──────────────────────────────────────────────────────────────────
 app.use('/api/auth',         authRoutes);
