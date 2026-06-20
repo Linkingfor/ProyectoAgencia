@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import {
   Plus, Search, Pencil, Trash2, Bus, CalendarCheck, CreditCard,
   Users, Clock, CheckCircle2, XCircle, AlertCircle, MapPin, ArrowRight,
-  Truck, UserPlus, Banknote, Receipt, X, Download
+  Truck, UserPlus, Banknote, Receipt, X, Download, MessageSquare
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
@@ -505,10 +505,12 @@ export function Reservas() {
   const [salidas, setSalidas]   = useState([]);
   const [horarios, setHorarios] = useState([]); // RFC-002: horarios del servicio elegido
   const [modal, setModal]       = useState(false);
-  const [form, setForm]         = useState({ id_cliente: '', id_servicio: '', id_horario: '', fecha_servicio: '', cantidad_personas: 1, id_salida: '' });
+  const [form, setForm]         = useState({ id_cliente: '', id_servicio: '', id_horario: '', fecha_servicio: '', cantidad_personas: 1, id_salida: '', observaciones: '' });
   const [disp, setDisp]         = useState(null);
   const [filtro, setFiltro]     = useState('todos');
   const [q, setQ]               = useState('');
+  const [obsModal, setObsModal] = useState(null); // reserva seleccionada para ver/editar observaciones
+  const [obsText, setObsText]   = useState('');
   const fmtHora = (h) => h ? h.slice(0, 5) : '--:--';
 
   const load = () => api.get('/reservas').then(r => setReservas(r.data));
@@ -525,8 +527,18 @@ export function Reservas() {
   };
 
   const openCreate = () => {
-    setForm({ id_cliente: '', id_servicio: '', id_horario: '', fecha_servicio: '', cantidad_personas: 1, id_salida: '' });
+    setForm({ id_cliente: '', id_servicio: '', id_horario: '', fecha_servicio: '', cantidad_personas: 1, id_salida: '', observaciones: '' });
     setHorarios([]); setDisp(null); setModal(true);
+  };
+
+  // RFC-005: ver/editar observaciones de una reserva ya registrada
+  const openObs = (r) => { setObsModal(r); setObsText(r.observaciones || ''); };
+  const saveObs = async () => {
+    try {
+      await api.patch(`/reservas/${obsModal.id_reserva}/observaciones`, { observaciones: obsText });
+      toast.success('Observaciones guardadas.');
+      setObsModal(null); load();
+    } catch (err) { toast.error(err.response?.data?.error || 'Error.'); }
   };
 
   const verificar = async () => {
@@ -597,7 +609,7 @@ export function Reservas() {
       <div className="card">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Código</th><th>Cliente</th><th>Servicio</th><th>Fecha viaje</th><th>Pax</th><th>Origen</th><th>Estado</th><th style={{ textAlign: 'right' }}>Acciones</th></tr></thead>
+            <thead><tr><th>Código</th><th>Cliente</th><th>Servicio</th><th>Fecha viaje</th><th>Pax</th><th>Origen</th><th>Observaciones</th><th>Estado</th><th style={{ textAlign: 'right' }}>Acciones</th></tr></thead>
             <tbody>
               {filtered.map(r => {
                 const e = estadoR[r.estado] || { cls: 'badge-gray', bar: '#94a3b8', label: r.estado };
@@ -623,6 +635,14 @@ export function Reservas() {
                     <td><span className="badge badge-blue">{r.cantidad_personas} pax</span></td>
                     <td><span className="badge badge-gray">{r.origen_reserva || 'intranet'}</span></td>
                     <td>
+                      <button className="obs-cell" onClick={() => openObs(r)} title={r.observaciones || 'Agregar observación'}>
+                        <MessageSquare size={13} />
+                        {r.observaciones
+                          ? (r.observaciones.length > 28 ? r.observaciones.slice(0, 28) + '…' : r.observaciones)
+                          : <span className="muted">— agregar</span>}
+                      </button>
+                    </td>
+                    <td>
                       <select className="form-select" style={{ fontSize: 12, padding: '6px 26px 6px 10px', width: 'auto' }}
                         value={r.estado} onChange={ev => cambiarEstado(r.id_reserva, ev.target.value)}>
                         <option value="pendiente">Pendiente</option>
@@ -639,7 +659,7 @@ export function Reservas() {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={8}><div className="empty-state"><div className="icon"><CalendarCheck size={26} /></div><h3>Sin reservas</h3><p>No hay reservas con ese filtro.</p></div></td></tr>
+                <tr><td colSpan={9}><div className="empty-state"><div className="icon"><CalendarCheck size={26} /></div><h3>Sin reservas</h3><p>No hay reservas con ese filtro.</p></div></td></tr>
               )}
             </tbody>
           </table>
@@ -714,6 +734,13 @@ export function Reservas() {
                 </p>
               </div>
 
+              <div className="form-group">
+                <label className="form-label">Observaciones (opcional)</label>
+                <textarea className="form-textarea" rows={2} value={form.observaciones}
+                  onChange={e => setForm({ ...form, observaciones: e.target.value })}
+                  placeholder="Ej: alergia a mariscos, silla de ruedas, celebra cumpleaños..." />
+              </div>
+
               <button className="btn btn-outline" onClick={verificar} disabled={!form.id_servicio || !form.fecha_servicio || !form.id_horario}>
                 <Search size={14} /> Verificar Disponibilidad
               </button>
@@ -760,7 +787,33 @@ export function Reservas() {
         </div>
       )}
 
+      {obsModal && (
+        <div className="modal-overlay" onClick={() => setObsModal(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3 className="modal-title">Observaciones — RES-{String(obsModal.id_reserva).padStart(3, '0')}</h3>
+            <p className="modal-desc">{obsModal.cliente_nombre} · {obsModal.servicio_nombre}</p>
+            <div className="modal-body">
+              <div className="form-group">
+                <label className="form-label">Requerimientos especiales del pasajero</label>
+                <textarea className="form-textarea" rows={4} value={obsText} onChange={e => setObsText(e.target.value)}
+                  placeholder="Ej: alergia a mariscos, silla de ruedas, celebra cumpleaños, pedido de asiento adelante..." />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setObsModal(null)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={saveObs}>Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
+        .obs-cell {
+          display: inline-flex; align-items: center; gap: 6px;
+          max-width: 200px; background: none; border: none; cursor: pointer;
+          font-size: 12.5px; color: var(--text-muted); padding: 4px 0; text-align: left;
+        }
+        .obs-cell:hover { color: var(--primary); }
         .disp-alert {
           display: flex; align-items: center; gap: 14px;
           padding: 14px 16px; border-radius: 12px; font-size: 13px;
