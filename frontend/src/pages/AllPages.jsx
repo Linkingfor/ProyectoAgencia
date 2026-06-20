@@ -38,8 +38,44 @@ export function Paquetes() {
   const [editId, setEditId] = useState(null);
   const [q, setQ]           = useState('');
 
+  // RFC-001: horarios por servicio
+  const [horModal, setHorModal]   = useState(null); // servicio seleccionado
+  const [horarios, setHorarios]   = useState([]);
+  const [horForm, setHorForm]     = useState({ hora_inicio: '', hora_fin: '' });
+  const [horEditId, setHorEditId] = useState(null);
+  const fmtHora = (h) => h ? h.slice(0, 5) : '--:--';
+
   const load = () => api.get('/servicios').then(r => setItems(r.data));
   useEffect(() => { load(); }, []);
+
+  const openHorarios = (s) => {
+    setHorModal(s);
+    setHorForm({ hora_inicio: '', hora_fin: '' });
+    setHorEditId(null);
+    api.get(`/horarios?id_servicio=${s.id_servicio}`).then(r => setHorarios(r.data));
+  };
+  const reloadHorarios = () => api.get(`/horarios?id_servicio=${horModal.id_servicio}`).then(r => setHorarios(r.data));
+
+  const saveHorario = async () => {
+    if (!horForm.hora_inicio || !horForm.hora_fin) return toast.error('Hora de inicio y fin son requeridas.');
+    try {
+      if (horEditId) {
+        await api.put(`/horarios/${horEditId}`, { ...horForm, estado: 'Activo' });
+        toast.success('Horario actualizado.');
+      } else {
+        await api.post('/horarios', { id_servicio: horModal.id_servicio, ...horForm, estado: 'Activo' });
+        toast.success('Horario agregado.');
+      }
+      setHorForm({ hora_inicio: '', hora_fin: '' }); setHorEditId(null);
+      reloadHorarios();
+    } catch (err) { toast.error(err.response?.data?.error || 'Error.'); }
+  };
+  const editHorario = (h) => { setHorForm({ hora_inicio: h.hora_inicio?.slice(0,5), hora_fin: h.hora_fin?.slice(0,5) }); setHorEditId(h.id_horario); };
+  const deleteHorario = async (h) => {
+    if (!confirm('¿Eliminar este horario?')) return;
+    try { await api.delete(`/horarios/${h.id_horario}`); toast.success('Horario eliminado.'); reloadHorarios(); }
+    catch (err) { toast.error(err.response?.data?.error || 'No se pudo eliminar.'); }
+  };
 
   const openCreate = () => { setForm(EMPTY_PKG); setEditId(null); setModal(true); };
   const openEdit   = (s) => {
@@ -52,9 +88,16 @@ export function Paquetes() {
       return toast.error('Nombre, precio y capacidad son requeridos.');
     }
     try {
-      if (editId) { await api.put(`/servicios/${editId}`, form); toast.success('Paquete actualizado.'); }
-      else        { await api.post('/servicios', form); toast.success('Paquete creado.'); }
-      setModal(false); load();
+      if (editId) {
+        await api.put(`/servicios/${editId}`, form); toast.success('Paquete actualizado.');
+        setModal(false); load();
+      } else {
+        const { data } = await api.post('/servicios', form);
+        toast.success('Paquete creado. Ahora agrega sus horarios de salida.');
+        setModal(false); load();
+        // Abrimos directo el modal de horarios para que registre los horarios del nuevo paquete
+        openHorarios({ id_servicio: data.id, nombre: form.nombre });
+      }
     } catch (err) { toast.error(err.response?.data?.error || 'Error.'); }
   };
 
@@ -123,6 +166,9 @@ export function Paquetes() {
                 <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => openEdit(s)}>
                   <Pencil size={13} /> Editar
                 </button>
+                <button className="btn btn-outline btn-sm" onClick={() => openHorarios(s)} title="Ver horarios">
+                  <Clock size={13} /> Horarios
+                </button>
                 <button className="btn-icon" onClick={() => toggle(s)} title={s.estado === 'activo' ? 'Desactivar' : 'Activar'}
                   style={{ color: s.estado === 'activo' ? '#10b981' : '#94a3b8' }}>
                   <Power size={15} />
@@ -170,10 +216,54 @@ export function Paquetes() {
                   <option value="inactivo">Inactivo</option>
                 </select>
               </div>
+              {!editId && (
+                <p className="form-hint">Después de crear el paquete podrás registrar sus horarios de salida.</p>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setModal(false)}>Cancelar</button>
               <button className="btn btn-primary" onClick={save}>Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {horModal && (
+        <div className="modal-overlay" onClick={() => setHorModal(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3 className="modal-title">Horarios — {horModal.nombre}</h3>
+            <p className="modal-desc">Horas de inicio y fin de cada salida que maneja este paquete.</p>
+            <div className="modal-body">
+              <div className="hor-list">
+                {horarios.length === 0 && <p className="muted" style={{ padding: '8px 0' }}>Sin horarios registrados todavía.</p>}
+                {horarios.map(h => (
+                  <div key={h.id_horario} className="hor-row">
+                    <Clock size={14} color="#2563eb" />
+                    <span>{fmtHora(h.hora_inicio)} – {fmtHora(h.hora_fin)}</span>
+                    <span className={`badge ${h.estado === 'Activo' ? 'badge-green' : 'badge-gray'}`}>{h.estado}</span>
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                      <button className="btn-icon" onClick={() => editHorario(h)}><Pencil size={13} /></button>
+                      <button className="btn-icon" onClick={() => deleteHorario(h)} style={{ color: '#ef4444' }}><Trash2 size={13} /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="form-grid" style={{ marginTop: 14 }}>
+                <div className="form-group">
+                  <label className="form-label">Hora inicio</label>
+                  <input type="time" className="form-input" value={horForm.hora_inicio} onChange={e => setHorForm({ ...horForm, hora_inicio: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Hora fin</label>
+                  <input type="time" className="form-input" value={horForm.hora_fin} onChange={e => setHorForm({ ...horForm, hora_fin: e.target.value })} />
+                </div>
+              </div>
+              <button className="btn btn-outline" style={{ width: '100%' }} onClick={saveHorario}>
+                <Plus size={14} /> {horEditId ? 'Actualizar horario' : 'Agregar horario'}
+              </button>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setHorModal(null)}>Cerrar</button>
             </div>
           </div>
         </div>
@@ -205,6 +295,13 @@ export function Paquetes() {
         }
         .paq-meta span { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); }
         .paq-actions { display: flex; gap: 6px; margin-top: auto; }
+
+        .hor-list { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; }
+        .hor-row {
+          display: flex; align-items: center; gap: 10px;
+          padding: 9px 12px; background: var(--bg-soft); border-radius: var(--r);
+          font-size: 13px; font-weight: 600;
+        }
       `}</style>
     </div>
   );

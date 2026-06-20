@@ -11,6 +11,7 @@ DROP TABLE IF EXISTS venta              CASCADE;
 DROP TABLE IF EXISTS reserva            CASCADE;
 DROP TABLE IF EXISTS asignacion         CASCADE;
 DROP TABLE IF EXISTS salidas            CASCADE;
+DROP TABLE IF EXISTS horario_servicio   CASCADE;
 DROP TABLE IF EXISTS usuario_cliente    CASCADE;
 DROP TABLE IF EXISTS usuario_trabajador CASCADE;
 DROP TABLE IF EXISTS transporte         CASCADE;
@@ -44,14 +45,26 @@ CREATE TABLE transporte (
     estado        VARCHAR(20)
 );
 
+-- RFC-001: horarios disponibles por servicio (mañana/tarde/etc.)
+CREATE TABLE horario_servicio (
+    id_horario  SERIAL PRIMARY KEY,
+    id_servicio INTEGER NOT NULL,
+    hora_inicio TIME NOT NULL,
+    hora_fin    TIME NOT NULL,
+    estado      VARCHAR(20) DEFAULT 'Activo',
+    CONSTRAINT fk_horario_servicio FOREIGN KEY (id_servicio) REFERENCES servicio(id_servicio)
+);
+
 CREATE TABLE salidas (
     id_salida            SERIAL PRIMARY KEY,
     fecha                DATE NOT NULL,
-    hora_salida          TIME,
-    hora_retorno         TIME,
     disponibilidad_stock INT,
     id_transporte        INT,
-    CONSTRAINT fk_salidas_transporte FOREIGN KEY (id_transporte) REFERENCES transporte(id_transporte)
+    id_horario           INT,
+    id_servicio          INT,
+    CONSTRAINT fk_salidas_transporte FOREIGN KEY (id_transporte) REFERENCES transporte(id_transporte),
+    CONSTRAINT fk_salida_horario     FOREIGN KEY (id_horario)    REFERENCES horario_servicio(id_horario),
+    CONSTRAINT fk_salida_servicio    FOREIGN KEY (id_servicio)   REFERENCES servicio(id_servicio)
 );
 
 CREATE TABLE trabajador (
@@ -147,6 +160,26 @@ INSERT INTO servicio (nombre, descripcion, precio, capacidad, estado) VALUES
 ('Sobrevuelo Líneas Nazca', 'Vuelo panorámico sobre los milenarios geoglifos de Nazca desde el aeródromo.', 450, 6,  'activo'),
 ('Viñedos y Bodegas',       'Recorrido por las principales bodegas vitivinícolas de Ica con cata de vinos y piscos.', 120, 20, 'activo'),
 ('Cañón de los Perdidos',   'Expedición al impresionante cañón ubicado en el desierto de Ocucaje. Paisajes increíbles.', 280, 12, 'activo');
+
+-- RFC-001: horarios reales por servicio
+INSERT INTO horario_servicio (id_servicio, hora_inicio, hora_fin, estado)
+SELECT id_servicio, '06:00', '16:00', 'Activo' FROM servicio WHERE nombre = 'Islas Ballestas';
+INSERT INTO horario_servicio (id_servicio, hora_inicio, hora_fin, estado)
+SELECT id_servicio, '06:00', '16:00', 'Activo' FROM servicio WHERE nombre = 'Cañón de los Perdidos';
+INSERT INTO horario_servicio (id_servicio, hora_inicio, hora_fin, estado)
+SELECT id_servicio, '06:00', '16:00', 'Activo' FROM servicio WHERE nombre = 'Reserva de Paracas';
+INSERT INTO horario_servicio (id_servicio, hora_inicio, hora_fin, estado)
+SELECT id_servicio, '06:00', '15:00', 'Activo' FROM servicio WHERE nombre = 'Sobrevuelo Líneas Nazca';
+INSERT INTO horario_servicio (id_servicio, hora_inicio, hora_fin, estado)
+SELECT id_servicio, '10:30', '13:30', 'Activo' FROM servicio WHERE nombre = 'Viñedos y Bodegas';
+INSERT INTO horario_servicio (id_servicio, hora_inicio, hora_fin, estado)
+SELECT id_servicio, '09:30', '14:30', 'Activo' FROM servicio WHERE nombre = 'Huacachina & Buggies';
+INSERT INTO horario_servicio (id_servicio, hora_inicio, hora_fin, estado)
+SELECT id_servicio, '11:30', '16:30', 'Activo' FROM servicio WHERE nombre = 'Huacachina & Buggies';
+INSERT INTO horario_servicio (id_servicio, hora_inicio, hora_fin, estado)
+SELECT id_servicio, '14:30', '18:30', 'Activo' FROM servicio WHERE nombre = 'Huacachina & Buggies';
+INSERT INTO horario_servicio (id_servicio, hora_inicio, hora_fin, estado)
+SELECT id_servicio, '16:30', '21:30', 'Activo' FROM servicio WHERE nombre = 'Huacachina & Buggies';
 
 INSERT INTO transporte (placa, tipo_vehiculo, capacidad, marca, estado) VALUES
 ('V1A-123', 'Minivan',   15, 'Toyota Hiace',  'disponible'),
