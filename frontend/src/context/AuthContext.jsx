@@ -1,0 +1,75 @@
+/* ════════════════════════════════════════════════════
+   AuthContext — La sesión del usuario en toda la app
+   ════════════════════════════════════════════════════
+   Este Context es el "estado global" del usuario logueado.
+   Cualquier componente puede leerlo con `useAuth()` y saber:
+     - usuario   → datos (nombre, tipo, etc.) o null si no hay sesión
+     - esTrabajador / esCliente → atajos para los route guards
+     - loginTrabajador / loginCliente / registerCliente / logout
+
+   Persiste el token en localStorage, así si recargas la página
+   sigues logueado hasta que el token expire (8h por defecto).
+   ════════════════════════════════════════════════════ */
+
+import { createContext, useContext, useState, useEffect } from 'react';
+import api from '../services/api';
+
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
+  const [usuario, setUsuario] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('usuario');
+    const token  = localStorage.getItem('token');
+    if (stored && token) {
+      try { setUsuario(JSON.parse(stored)); } catch { /* ignore */ }
+    }
+    setLoading(false);
+  }, []);
+
+  const persist = (data) => {
+    localStorage.setItem('token',   data.token);
+    localStorage.setItem('usuario', JSON.stringify(data.usuario));
+    setUsuario(data.usuario);
+    return data.usuario;
+  };
+
+  // ── Intranet (trabajadores) ──
+  const loginTrabajador = async (username, password) => {
+    const { data } = await api.post('/auth/login', { username, password });
+    return persist(data);
+  };
+
+  // ── Página comercial (clientes) ──
+  const loginCliente = async (username, password) => {
+    const { data } = await api.post('/auth/cliente/login', { username, password });
+    return persist(data);
+  };
+
+  const registerCliente = async (payload) => {
+    const { data } = await api.post('/auth/cliente/register', payload);
+    return persist(data);
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('usuario');
+    setUsuario(null);
+  };
+
+  const esTrabajador = usuario?.tipo === 'trabajador';
+  const esCliente    = usuario?.tipo === 'cliente';
+
+  return (
+    <AuthContext.Provider value={{
+      usuario, loading, esTrabajador, esCliente,
+      loginTrabajador, loginCliente, registerCliente, logout,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export const useAuth = () => useContext(AuthContext);
