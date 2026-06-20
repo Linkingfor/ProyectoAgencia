@@ -7,10 +7,11 @@ const getAll = async (req, res) => {
     let sql = `
       SELECT a.id_asignacion, a.id_salida, a.id_trabajador, a.funcion,
              t.nombres AS trabajador_nombre, t.puesto AS trabajador_puesto,
-             s.fecha, s.hora_salida
+             s.fecha, h.hora_inicio AS hora_salida
       FROM asignacion a
       JOIN trabajador t ON t.id_trabajador = a.id_trabajador
       JOIN salidas s    ON s.id_salida    = a.id_salida
+      LEFT JOIN horario_servicio h ON h.id_horario = s.id_horario
     `;
     const params = [];
     if (id_salida) { sql += ' WHERE a.id_salida = $1'; params.push(id_salida); }
@@ -36,19 +37,25 @@ const create = async (req, res) => {
       return res.status(400).json({ error: 'El trabajador ya está asignado a esta salida.' });
     }
 
-    // Datos de la salida destino
-    const sal = await pool.query('SELECT fecha, hora_salida, hora_retorno FROM salidas WHERE id_salida = $1', [id_salida]);
+    // Datos de la salida destino (horario a través de horario_servicio)
+    const sal = await pool.query(
+      `SELECT s.fecha, h.hora_inicio, h.hora_fin
+       FROM salidas s LEFT JOIN horario_servicio h ON h.id_horario = s.id_horario
+       WHERE s.id_salida = $1`,
+      [id_salida]
+    );
     if (sal.rows.length === 0) return res.status(404).json({ error: 'Salida no encontrada.' });
-    const { fecha, hora_salida, hora_retorno } = sal.rows[0];
+    const { fecha, hora_inicio, hora_fin } = sal.rows[0];
 
     // Cruce de horario: otra salida el mismo día con horario solapado
     const cruce = await pool.query(`
       SELECT s.id_salida FROM asignacion a
       JOIN salidas s ON s.id_salida = a.id_salida
+      LEFT JOIN horario_servicio h ON h.id_horario = s.id_horario
       WHERE a.id_trabajador = $1 AND s.fecha = $2 AND s.id_salida <> $3
-        AND COALESCE(s.hora_salida, '00:00'::time)  < COALESCE($5::time, '23:59'::time)
-        AND COALESCE(s.hora_retorno,'23:59'::time)  > COALESCE($4::time, '00:00'::time)
-    `, [id_trabajador, fecha, id_salida, hora_salida, hora_retorno]);
+        AND COALESCE(h.hora_inicio, '00:00'::time) < COALESCE($5::time, '23:59'::time)
+        AND COALESCE(h.hora_fin,   '23:59'::time) > COALESCE($4::time, '00:00'::time)
+    `, [id_trabajador, fecha, id_salida, hora_inicio, hora_fin]);
 
     if (cruce.rows.length > 0) {
       return res.status(400).json({

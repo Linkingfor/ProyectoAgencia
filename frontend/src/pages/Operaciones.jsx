@@ -176,18 +176,18 @@ export function Transporte() {
 }
 
 // ---- Salidas - programación y personal asignado ----
-const TURNOS = {
-  'manana': { label: 'Mañana · 07:00 – 13:00', hora_salida: '07:00', hora_retorno: '13:00' },
-  'tarde':  { label: 'Tarde · 12:00 – 18:00',  hora_salida: '12:00', hora_retorno: '18:00' },
-};
-const turnoDe = (horaSalida) => (horaSalida && horaSalida.startsWith('07') ? 'manana' : horaSalida ? 'tarde' : 'manana');
+// RFC-001: cada salida se programa eligiendo un servicio y uno de sus
+// horarios (tabla horario_servicio), en vez de un turno fijo.
+const fmtHora = (h) => h ? h.slice(0, 5) : '--:--';
 
 export function Salidas() {
   const [salidas, setSalidas]   = useState([]);
   const [transportes, setTrans] = useState([]);
   const [trabajadores, setTrab] = useState([]);
+  const [servicios, setServicios] = useState([]);
+  const [horarios, setHorarios] = useState([]); // horarios del servicio elegido en el form
   const [modal, setModal]       = useState(false);
-  const [form, setForm]         = useState({ fecha: '', turno: 'manana', id_transporte: '', disponibilidad_stock: '' });
+  const [form, setForm]         = useState({ fecha: '', id_servicio: '', id_horario: '', id_transporte: '', disponibilidad_stock: '' });
   const [editId, setEditId]     = useState(null);
   const [asignModal, setAsignModal] = useState(null); // salida seleccionada
   const [asignaciones, setAsignaciones] = useState([]);
@@ -198,27 +198,36 @@ export function Salidas() {
     load();
     api.get('/transporte').then(r => setTrans(r.data));
     api.get('/trabajadores').then(r => setTrab(r.data));
+    api.get('/servicios').then(r => setServicios(r.data.filter(s => s.estado === 'activo')));
   }, []);
 
+  const cargarHorarios = (id_servicio) => {
+    if (!id_servicio) { setHorarios([]); return; }
+    api.get(`/horarios?id_servicio=${id_servicio}`).then(r => setHorarios(r.data));
+  };
+
   const openCreate = () => {
-    setForm({ fecha: new Date().toISOString().split('T')[0], turno: 'manana', id_transporte: '', disponibilidad_stock: '' });
+    setForm({ fecha: new Date().toISOString().split('T')[0], id_servicio: '', id_horario: '', id_transporte: '', disponibilidad_stock: '' });
+    setHorarios([]);
     setEditId(null); setModal(true);
   };
   const openEdit = (s) => {
-    setForm({ fecha: s.fecha, turno: turnoDe(s.hora_salida),
+    setForm({ fecha: s.fecha, id_servicio: s.id_servicio || '', id_horario: s.id_horario || '',
       id_transporte: s.id_transporte || '', disponibilidad_stock: s.disponibilidad_stock || '' });
+    cargarHorarios(s.id_servicio);
     setEditId(s.id_salida); setModal(true);
   };
 
   const save = async () => {
-    if (!form.fecha || !form.id_transporte) return toast.error('Fecha y vehículo son requeridos.');
-    const t = TURNOS[form.turno];
+    if (!form.fecha || !form.id_transporte || !form.id_servicio || !form.id_horario) {
+      return toast.error('Fecha, servicio, horario y vehículo son requeridos.');
+    }
     const payload = {
       fecha: form.fecha,
       id_transporte: form.id_transporte,
       disponibilidad_stock: form.disponibilidad_stock,
-      hora_salida: t.hora_salida,
-      hora_retorno: t.hora_retorno,
+      id_servicio: form.id_servicio,
+      id_horario: form.id_horario,
     };
     try {
       if (editId) { await api.put(`/salidas/${editId}`, payload); toast.success('Salida actualizada.'); }
@@ -315,7 +324,7 @@ export function Salidas() {
                     <td>
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         <span style={{ fontWeight: 600 }}>{s.fecha}</span>
-                        <span className="muted">{TURNOS[turnoDe(s.hora_salida)].label}</span>
+                        <span className="muted">{fmtHora(s.hora_inicio)} – {fmtHora(s.hora_fin)}</span>
                       </div>
                     </td>
                     <td>
@@ -363,6 +372,28 @@ export function Salidas() {
             <p className="modal-desc">Programa la salida y asigna un vehículo de la flota.</p>
             <div className="modal-body">
               <div className="form-group">
+                <label className="form-label">Servicio / Tour</label>
+                <select className="form-select" value={form.id_servicio}
+                  onChange={e => { setForm({ ...form, id_servicio: e.target.value, id_horario: '' }); cargarHorarios(e.target.value); }}>
+                  <option value="">Seleccionar servicio...</option>
+                  {servicios.map(s => <option key={s.id_servicio} value={s.id_servicio}>{s.nombre}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Horario</label>
+                <select className="form-select" value={form.id_horario}
+                  onChange={e => setForm({ ...form, id_horario: e.target.value })}
+                  disabled={!form.id_servicio}>
+                  <option value="">Seleccionar horario...</option>
+                  {horarios.map(h => (
+                    <option key={h.id_horario} value={h.id_horario}>{fmtHora(h.hora_inicio)} – {fmtHora(h.hora_fin)}</option>
+                  ))}
+                </select>
+                {form.id_servicio && horarios.length === 0 && (
+                  <p className="form-hint">Este servicio no tiene horarios configurados todavía.</p>
+                )}
+              </div>
+              <div className="form-group">
                 <label className="form-label">Vehículo</label>
                 <select className="form-select" value={form.id_transporte} onChange={e => setForm({ ...form, id_transporte: e.target.value })}>
                   <option value="">Seleccionar vehículo...</option>
@@ -370,18 +401,6 @@ export function Salidas() {
                     <option key={t.id_transporte} value={t.id_transporte}>{t.tipo_vehiculo} {t.placa} — {t.capacidad} pax</option>
                   ))}
                 </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Turno</label>
-                <div className="turno-pick">
-                  {Object.entries(TURNOS).map(([k, v]) => (
-                    <button key={k} type="button"
-                      className={`turno-btn ${form.turno === k ? 'active' : ''}`}
-                      onClick={() => setForm({ ...form, turno: k })}>
-                      {v.label}
-                    </button>
-                  ))}
-                </div>
               </div>
               <div className="form-grid">
                 <div className="form-group">
