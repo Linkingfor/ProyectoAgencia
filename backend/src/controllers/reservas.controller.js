@@ -32,9 +32,9 @@ const getById = async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// GET /api/reservas/disponibilidad?id_servicio=&fecha_servicio=&cantidad_personas=&id_salida=
+// GET /api/reservas/disponibilidad?id_servicio=&fecha_servicio=&cantidad_personas=&id_salida=&id_horario=
 const checkDisponibilidad = async (req, res) => {
-  const { id_servicio, fecha_servicio, cantidad_personas, id_salida } = req.query;
+  const { id_servicio, fecha_servicio, cantidad_personas, id_salida, id_horario } = req.query;
   const cant = parseInt(cantidad_personas || 1);
   try {
     const srv = await pool.query('SELECT capacidad, nombre FROM servicio WHERE id_servicio = $1', [id_servicio]);
@@ -50,35 +50,51 @@ const checkDisponibilidad = async (req, res) => {
     const ocupadosServicio = Number(ocupSrv.rows[0].pax);
     const disponiblesServicio = capacidadServicio - ocupadosServicio;
 
-    // Si hay salida, validar fecha, tour y capacidad del vehículo
+    // RFC-002: si no se eligió una salida explícita, vemos si ya existe una para
+    // ese servicio+horario+fecha (se reutilizaría) o si se creará una nueva automáticamente
+    let idSalidaEfectiva = id_salida || null;
+    let salida_se_creara = false;
+    if (!idSalidaEfectiva && id_horario) {
+      const ex = await pool.query(
+        'SELECT id_salida FROM salidas WHERE id_servicio = $1 AND id_horario = $2 AND fecha = $3::date',
+        [id_servicio, id_horario, fecha_servicio]
+      );
+      if (ex.rows.length > 0) idSalidaEfectiva = ex.rows[0].id_salida;
+      else salida_se_creara = true;
+    }
+
+    // Si hay salida (elegida o ya existente), validar fecha, tour y capacidad del vehículo
     let info_salida = null;
     let salida_otro_tour = null;
-    let salida_fecha = null;          // fecha de la salida si no coincide
-    if (id_salida) {
+    let salida_fecha = null; // fecha de la salida si no coincide
+    if (idSalidaEfectiva) {
       const sal = await pool.query(`
         SELECT s.id_salida, (s.fecha = $2::date) AS fecha_ok,
-               TO_CHAR(s.fecha,'YYYY-MM-DD') AS fecha,
+               TO_CHAR(s.fecha,'YYYY-MM-DD') AS fecha, s.id_transporte,
                t.capacidad AS cap_vehiculo, t.placa, t.tipo_vehiculo,
                COALESCE((SELECT SUM(cantidad_personas) FROM reserva
                          WHERE id_salida = s.id_salida AND estado <> 'cancelada'), 0) AS pax_salida
         FROM salidas s LEFT JOIN transporte t ON t.id_transporte = s.id_transporte
         WHERE s.id_salida = $1
-      `, [id_salida, fecha_servicio]);
+      `, [idSalidaEfectiva, fecha_servicio]);
       if (sal.rows.length > 0) {
         const x = sal.rows[0];
         if (!x.fecha_ok) salida_fecha = x.fecha;
-        info_salida = {
-          capacidad_vehiculo: Number(x.cap_vehiculo || 0),
-          ocupados_vehiculo: Number(x.pax_salida),
-          disponibles_vehiculo: Number(x.cap_vehiculo || 0) - Number(x.pax_salida),
-          vehiculo: `${x.tipo_vehiculo || ''} ${x.placa || ''}`.trim(),
-        };
+        // si la salida todavía no tiene vehículo asignado, no limitamos por capacidad de transporte
+        if (x.id_transporte) {
+          info_salida = {
+            capacidad_vehiculo: Number(x.cap_vehiculo || 0),
+            ocupados_vehiculo: Number(x.pax_salida),
+            disponibles_vehiculo: Number(x.cap_vehiculo || 0) - Number(x.pax_salida),
+            vehiculo: `${x.tipo_vehiculo || ''} ${x.placa || ''}`.trim(),
+          };
+        }
       }
       const ot = await pool.query(
         `SELECT s.nombre FROM reserva r
          JOIN servicio s ON s.id_servicio = r.id_servicio
          WHERE r.id_salida = $1 AND r.estado <> 'cancelada' AND r.id_servicio <> $2 LIMIT 1`,
-        [id_salida, id_servicio]
+        [idSalidaEfectiva, id_servicio]
       );
       if (ot.rows.length > 0) salida_otro_tour = ot.rows[0].nombre;
     }
@@ -95,14 +111,17 @@ const checkDisponibilidad = async (req, res) => {
       info_salida,
       salida_otro_tour,
       salida_fecha_distinta: salida_fecha,
+      salida_se_creara,
       puede_reservar: cabeServicio && cabeVehiculo && !salida_otro_tour && !salida_fecha,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
 // POST /api/reservas  → crea reserva con validación de capacidad (RF-04)
+// RFC-002: si no se indica id_salida, se busca o se crea automáticamente
+// una salida usando id_servicio + id_horario + fecha_servicio.
 const create = async (req, res) => {
-  const { id_cliente, id_servicio, fecha_servicio, cantidad_personas, id_salida, origen_reserva } = req.body;
+  const { id_cliente, id_servicio, fecha_servicio, cantidad_personas, id_salida, id_horario, origen_reserva } = req.body;
   const cant = parseInt(cantidad_personas);
 
   if (!id_cliente || !id_servicio || !fecha_servicio || !cant) {
@@ -142,17 +161,46 @@ const create = async (req, res) => {
       });
     }
 
-    // ── Validaciones de la salida (si se asigna una) ──
-    if (id_salida) {
+    // ── RFC-002: resolver la salida — la elegida, una existente del mismo
+    //    servicio+horario+fecha, o una nueva creada automáticamente ──
+    let salidaId = id_salida || null;
+
+    if (!salidaId && id_horario) {
+      const horOk = await client.query(
+        'SELECT 1 FROM horario_servicio WHERE id_horario = $1 AND id_servicio = $2',
+        [id_horario, id_servicio]
+      );
+      if (horOk.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'El horario seleccionado no pertenece a ese servicio.' });
+      }
+
+      const existente = await client.query(
+        'SELECT id_salida FROM salidas WHERE id_servicio = $1 AND id_horario = $2 AND fecha = $3::date',
+        [id_servicio, id_horario, fecha_servicio]
+      );
+      if (existente.rows.length > 0) {
+        salidaId = existente.rows[0].id_salida;
+      } else {
+        const nueva = await client.query(
+          'INSERT INTO salidas (fecha, id_servicio, id_horario) VALUES ($1,$2,$3) RETURNING id_salida',
+          [fecha_servicio, id_servicio, id_horario]
+        );
+        salidaId = nueva.rows[0].id_salida;
+      }
+    }
+
+    // ── Validaciones de la salida (si quedó una asignada/creada) ──
+    if (salidaId) {
       const sal = await client.query(`
         SELECT (s.fecha = $2::date) AS fecha_ok,
-               TO_CHAR(s.fecha,'YYYY-MM-DD') AS fecha,
+               TO_CHAR(s.fecha,'YYYY-MM-DD') AS fecha, s.id_transporte,
                t.capacidad AS cap, t.placa, t.tipo_vehiculo,
                COALESCE((SELECT SUM(cantidad_personas) FROM reserva
                          WHERE id_salida = $1 AND estado <> 'cancelada'), 0) AS pax
         FROM salidas s LEFT JOIN transporte t ON t.id_transporte = s.id_transporte
         WHERE s.id_salida = $1
-      `, [id_salida, fecha_servicio]);
+      `, [salidaId, fecha_servicio]);
       if (sal.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Salida no encontrada.' }); }
       const S = sal.rows[0];
 
@@ -169,7 +217,7 @@ const create = async (req, res) => {
         `SELECT srv.nombre FROM reserva r
          JOIN servicio srv ON srv.id_servicio = r.id_servicio
          WHERE r.id_salida = $1 AND r.estado <> 'cancelada' AND r.id_servicio <> $2 LIMIT 1`,
-        [id_salida, id_servicio]
+        [salidaId, id_servicio]
       );
       if (otroTour.rows.length > 0) {
         await client.query('ROLLBACK');
@@ -178,25 +226,27 @@ const create = async (req, res) => {
         });
       }
 
-      // 3c: capacidad del vehículo de la salida
-      const capVeh = Number(S.cap || 0);
-      const paxVeh = Number(S.pax);
-      if (paxVeh + cant > capVeh) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          error: `VEHÍCULO SIN CUPOS — El vehículo ${S.tipo_vehiculo} ${S.placa} admite ${capVeh} pax (ocupados: ${paxVeh}). Asigna un vehículo de mayor capacidad.`
-        });
+      // 3c: capacidad del vehículo — solo si la salida ya tiene uno asignado
+      if (S.id_transporte) {
+        const capVeh = Number(S.cap || 0);
+        const paxVeh = Number(S.pax);
+        if (paxVeh + cant > capVeh) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: `VEHÍCULO SIN CUPOS — El vehículo ${S.tipo_vehiculo} ${S.placa} admite ${capVeh} pax (ocupados: ${paxVeh}). Asigna un vehículo de mayor capacidad.`
+          });
+        }
       }
     }
 
     const ins = await client.query(
       `INSERT INTO reserva (fecha_reserva, fecha_servicio, cantidad_personas, estado, origen_reserva, id_cliente, id_servicio, id_salida)
        VALUES (CURRENT_DATE, $1, $2, 'pendiente', $3, $4, $5, $6) RETURNING id_reserva`,
-      [fecha_servicio, cant, origen_reserva || 'intranet', id_cliente, id_servicio, id_salida || null]
+      [fecha_servicio, cant, origen_reserva || 'intranet', id_cliente, id_servicio, salidaId]
     );
 
     await client.query('COMMIT');
-    res.status(201).json({ mensaje: 'Reserva creada exitosamente.', id: ins.rows[0].id_reserva });
+    res.status(201).json({ mensaje: 'Reserva creada exitosamente.', id: ins.rows[0].id_reserva, id_salida: salidaId });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -226,7 +276,7 @@ const asignarSalida = async (req, res) => {
 
     if (id_salida) {
       const sal = await pool.query(`
-        SELECT (s.fecha = $3::date) AS fecha_ok, TO_CHAR(s.fecha,'YYYY-MM-DD') AS fecha,
+        SELECT (s.fecha = $3::date) AS fecha_ok, TO_CHAR(s.fecha,'YYYY-MM-DD') AS fecha, s.id_transporte,
                t.capacidad AS cap, t.placa, t.tipo_vehiculo,
                COALESCE((SELECT SUM(cantidad_personas) FROM reserva
                          WHERE id_salida = $1 AND estado <> 'cancelada' AND id_reserva <> $2), 0) AS pax
@@ -254,12 +304,14 @@ const asignarSalida = async (req, res) => {
         });
       }
 
-      const capVeh = Number(S.cap || 0);
-      const paxVeh = Number(S.pax);
-      if (paxVeh + cant > capVeh) {
-        return res.status(400).json({
-          error: `VEHÍCULO SIN CUPOS — El vehículo ${S.tipo_vehiculo} ${S.placa} admite ${capVeh} pax (ocupados: ${paxVeh}).`
-        });
+      if (S.id_transporte) {
+        const capVeh = Number(S.cap || 0);
+        const paxVeh = Number(S.pax);
+        if (paxVeh + cant > capVeh) {
+          return res.status(400).json({
+            error: `VEHÍCULO SIN CUPOS — El vehículo ${S.tipo_vehiculo} ${S.placa} admite ${capVeh} pax (ocupados: ${paxVeh}).`
+          });
+        }
       }
     }
     await pool.query('UPDATE reserva SET id_salida = $1 WHERE id_reserva = $2', [id_salida || null, req.params.id]);
