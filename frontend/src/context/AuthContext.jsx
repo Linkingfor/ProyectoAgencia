@@ -29,8 +29,16 @@ export function AuthProvider({ children }) {
     return persist(data);
   };
 
+  // login y registro para clientes de la web
+  const loginCliente = async (username, password) => {
+    const { data } = await api.post('/auth/cliente/login', { username, password });
+    return persist(data);
+  };
 
-
+  const registerCliente = async (payload) => {
+    const { data } = await api.post('/auth/cliente/register', payload);
+    return persist(data);
+  };
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -39,12 +47,12 @@ export function AuthProvider({ children }) {
   };
 
   const esTrabajador = usuario?.tipo === 'trabajador';
-  
+  const esCliente    = usuario?.tipo === 'cliente';
 
   return (
     <AuthContext.Provider value={{
-      usuario, loading, esTrabajador,
-      loginTrabajador, logout,
+      usuario, loading, esTrabajador, esCliente,
+      loginTrabajador, loginCliente, registerCliente, logout,
     }}>
       {children}
     </AuthContext.Provider>

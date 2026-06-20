@@ -5,7 +5,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import ComercialLayout from './comercial/ComercialLayout';
 import Home            from './comercial/Home';
 import Catalogo        from './comercial/Catalogo';
-
+import ClienteAuth     from './comercial/ClienteAuth';
+import MiCuenta        from './comercial/MiCuenta';
 
 import IntranetLogin from './pages/Login';
 import Layout        from './components/Layout/Layout';
@@ -23,6 +24,11 @@ function Cargando() {
   );
 }
 
+function RequireCliente({ children }) {
+  const { esCliente, loading } = useAuth();
+  if (loading) return <Cargando />;
+  return esCliente ? children : <Navigate to="/ingresar" replace />;
+}
 
 function RequireTrabajador({ children }) {
   const { esTrabajador, loading } = useAuth();
@@ -39,7 +45,8 @@ function AppRoutes() {
       <Route element={<ComercialLayout />}>
         <Route index path="/" element={<Home />} />
         <Route path="/catalogo" element={<Catalogo />} />
-      
+        <Route path="/ingresar" element={esCliente ? <Navigate to="/mi-cuenta" replace /> : <ClienteAuth />} />
+        <Route path="/mi-cuenta" element={<RequireCliente><MiCuenta /></RequireCliente>} />
       </Route>
 
       <Route path="/admin/login" element={esTrabajador ? <Navigate to="/admin" replace /> : <IntranetLogin />} />

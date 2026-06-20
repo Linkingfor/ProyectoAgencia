@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { Search, Users, Clock, ArrowRight, Info } from 'lucide-react';
+import Compra from './Compra';
 
 const categorias = ['Todos', 'Aventura', 'Naturaleza', 'Arqueológico', 'Cultural'];
 
@@ -23,6 +24,7 @@ export default function Catalogo() {
   const [cat, setCat] = useState('Todos');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
+  const [comprando, setComprando] = useState(null); // paquete seleccionado para compra
 
   useEffect(() => {
     api.get('/public/catalogo')
@@ -98,7 +100,7 @@ export default function Catalogo() {
                         <strong>S/ {Number(p.precio).toFixed(2)}</strong>
                       </div>
                       {esCliente ? (
-                        <button className="cat-card-btn">
+                        <button className="cat-card-btn" onClick={() => setComprando(p)}>
                           Reservar <ArrowRight size={13} />
                         </button>
                       ) : (
@@ -122,6 +124,7 @@ export default function Catalogo() {
         )}
       </div>
 
+      {comprando && <Compra paquete={comprando} onClose={() => setComprando(null)} />}
 
       <style>{`
         .cat { animation: fadeIn 0.35s ease; }

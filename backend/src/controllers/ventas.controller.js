@@ -89,6 +89,7 @@ const create = async (req, res) => {
 };
 
 // GET /api/ventas/:id/pdf  → descarga el comprobante en PDF (RFC-004)
+// Permite tanto a trabajadores (intranet) como al cliente dueño de la venta
 const downloadPdf = async (req, res) => {
   try {
     const ventaR = await pool.query(`
@@ -99,6 +100,11 @@ const downloadPdf = async (req, res) => {
     `, [req.params.id]);
     if (ventaR.rows.length === 0) return res.status(404).json({ error: 'Venta no encontrada.' });
     const venta = ventaR.rows[0];
+
+    // Si quien pide es un cliente, debe ser el dueño
+    if (req.user?.tipo === 'cliente' && req.user.id_cliente !== venta.id_cliente) {
+      return res.status(403).json({ error: 'No tienes permiso para ver este comprobante.' });
+    }
 
     const detalles = (await pool.query(`
       SELECT dv.*, s.nombre AS servicio_nombre

@@ -24,6 +24,13 @@ const soloTrabajador = (req, res, next) => {
   next();
 };
 
+// Exige que el usuario sea de tipo cliente (página comercial)
+const soloCliente = (req, res, next) => {
+  if (req.user?.tipo !== 'cliente') {
+    return res.status(403).json({ error: 'Acceso restringido a clientes.' });
+  }
+  next();
+};
 
 // Exige uno de los puestos indicados (solo aplica a trabajadores)
 const verifyPuesto = (...puestos) => (req, res, next) => {
@@ -33,4 +40,4 @@ const verifyPuesto = (...puestos) => (req, res, next) => {
   next();
 };
 
-module.exports = { verifyToken, soloTrabajador, verifyPuesto };
+module.exports = { verifyToken, soloTrabajador, soloCliente, verifyPuesto };

@@ -7,6 +7,9 @@ const { verifyToken, soloTrabajador, verifyPuesto } = require('../middleware/aut
 router.post('/login',    auth.loginTrabajador);
 router.post('/register', verifyToken, verifyPuesto('administrador'), auth.registerTrabajador);
 
+// ── Página comercial (clientes) ──
+router.post('/cliente/login',    auth.loginCliente);
+router.post('/cliente/register', auth.registerCliente);   // auto-registro público
 
 // ── Común ──
 router.get('/me', verifyToken, auth.me);
