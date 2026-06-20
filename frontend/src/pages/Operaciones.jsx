@@ -503,11 +503,13 @@ export function Reservas() {
   const [clientes, setClientes] = useState([]);
   const [servicios, setServicios] = useState([]);
   const [salidas, setSalidas]   = useState([]);
+  const [horarios, setHorarios] = useState([]); // RFC-002: horarios del servicio elegido
   const [modal, setModal]       = useState(false);
-  const [form, setForm]         = useState({ id_cliente: '', id_servicio: '', fecha_servicio: '', cantidad_personas: 1, id_salida: '' });
+  const [form, setForm]         = useState({ id_cliente: '', id_servicio: '', id_horario: '', fecha_servicio: '', cantidad_personas: 1, id_salida: '' });
   const [disp, setDisp]         = useState(null);
   const [filtro, setFiltro]     = useState('todos');
   const [q, setQ]               = useState('');
+  const fmtHora = (h) => h ? h.slice(0, 5) : '--:--';
 
   const load = () => api.get('/reservas').then(r => setReservas(r.data));
   useEffect(() => {
@@ -517,15 +519,20 @@ export function Reservas() {
     api.get('/salidas').then(r => setSalidas(r.data));
   }, []);
 
+  const cargarHorarios = (id_servicio) => {
+    if (!id_servicio) { setHorarios([]); return; }
+    api.get(`/horarios?id_servicio=${id_servicio}`).then(r => setHorarios(r.data));
+  };
+
   const openCreate = () => {
-    setForm({ id_cliente: '', id_servicio: '', fecha_servicio: '', cantidad_personas: 1, id_salida: '' });
-    setDisp(null); setModal(true);
+    setForm({ id_cliente: '', id_servicio: '', id_horario: '', fecha_servicio: '', cantidad_personas: 1, id_salida: '' });
+    setHorarios([]); setDisp(null); setModal(true);
   };
 
   const verificar = async () => {
-    if (!form.id_servicio || !form.fecha_servicio) return toast.error('Elige servicio y fecha.');
+    if (!form.id_servicio || !form.fecha_servicio || !form.id_horario) return toast.error('Elige servicio, horario y fecha.');
     try {
-      const qs = `id_servicio=${form.id_servicio}&fecha_servicio=${form.fecha_servicio}&cantidad_personas=${form.cantidad_personas}${form.id_salida ? `&id_salida=${form.id_salida}` : ''}`;
+      const qs = `id_servicio=${form.id_servicio}&fecha_servicio=${form.fecha_servicio}&cantidad_personas=${form.cantidad_personas}&id_horario=${form.id_horario}${form.id_salida ? `&id_salida=${form.id_salida}` : ''}`;
       const { data } = await api.get(`/reservas/disponibilidad?${qs}`);
       setDisp(data);
     } catch (err) { toast.error(err.response?.data?.error || 'Error.'); }
@@ -654,10 +661,25 @@ export function Reservas() {
               </div>
               <div className="form-group">
                 <label className="form-label">Servicio / Tour</label>
-                <select className="form-select" value={form.id_servicio} onChange={e => { setForm({ ...form, id_servicio: e.target.value, id_salida: '' }); setDisp(null); }}>
+                <select className="form-select" value={form.id_servicio}
+                  onChange={e => { setForm({ ...form, id_servicio: e.target.value, id_horario: '', id_salida: '' }); cargarHorarios(e.target.value); setDisp(null); }}>
                   <option value="">Seleccionar servicio...</option>
                   {servicios.map(s => <option key={s.id_servicio} value={s.id_servicio}>{s.nombre} — {money(s.precio)} (cap. {s.capacidad})</option>)}
                 </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Horario</label>
+                <select className="form-select" value={form.id_horario}
+                  onChange={e => { setForm({ ...form, id_horario: e.target.value, id_salida: '' }); setDisp(null); }}
+                  disabled={!form.id_servicio}>
+                  <option value="">Seleccionar horario...</option>
+                  {horarios.map(h => (
+                    <option key={h.id_horario} value={h.id_horario}>{fmtHora(h.hora_inicio)} – {fmtHora(h.hora_fin)}</option>
+                  ))}
+                </select>
+                {form.id_servicio && horarios.length === 0 && (
+                  <p className="form-hint">Este servicio no tiene horarios configurados. Agrégalos en el módulo Paquetes.</p>
+                )}
               </div>
               <div className="form-grid">
                 <div className="form-group">
@@ -674,27 +696,25 @@ export function Reservas() {
                 <select className="form-select" value={form.id_salida}
                   onChange={e => { setForm({ ...form, id_salida: e.target.value }); setDisp(null); }}
                   disabled={!form.id_servicio || !form.fecha_servicio}>
-                  <option value="">Sin salida asignada</option>
+                  <option value="">Automática (se crea o reutiliza según el horario)</option>
                   {salidas
                     .filter(s => s.fecha === form.fecha_servicio
                       && (!s.id_servicio_tour || String(s.id_servicio_tour) === String(form.id_servicio)))
                     .map(s => (
                       <option key={s.id_salida} value={s.id_salida}>
-                        SAL-{String(s.id_salida).padStart(3, '0')} · {s.tipo_vehiculo} {s.placa} (cap. {s.capacidad_transporte})
+                        SAL-{String(s.id_salida).padStart(3, '0')} · {s.tipo_vehiculo ? `${s.tipo_vehiculo} ${s.placa}` : 'sin vehículo asignado'}
                         {s.tour_nombre ? ` · ${s.tour_nombre}` : ' · libre'}
                       </option>
                     ))}
                 </select>
                 <p className="form-hint">
-                  {!form.id_servicio || !form.fecha_servicio
-                    ? 'Elige servicio y fecha para ver las salidas de ese día.'
-                    : (salidas.filter(s => s.fecha === form.fecha_servicio && (!s.id_servicio_tour || String(s.id_servicio_tour) === String(form.id_servicio))).length === 0
-                        ? 'No hay salidas para esa fecha. Programa una en el módulo Salidas o reserva sin salida.'
-                        : 'Solo se muestran salidas del mismo día y compatibles con este tour.')}
+                  {!form.id_servicio || !form.fecha_servicio || !form.id_horario
+                    ? 'Elige servicio, horario y fecha. Si no escoges una salida puntual, el sistema buscará o creará una automáticamente para ese servicio, horario y fecha.'
+                    : 'Déjalo en automático y el sistema reutiliza la salida de ese horario/fecha, o crea una nueva. El personal operativo le asignará el vehículo después en el módulo Salidas.'}
                 </p>
               </div>
 
-              <button className="btn btn-outline" onClick={verificar} disabled={!form.id_servicio || !form.fecha_servicio}>
+              <button className="btn btn-outline" onClick={verificar} disabled={!form.id_servicio || !form.fecha_servicio || !form.id_horario}>
                 <Search size={14} /> Verificar Disponibilidad
               </button>
 
@@ -721,7 +741,9 @@ export function Reservas() {
                           : disp.salida_otro_tour
                           ? `La salida seleccionada ya atiende el tour "${disp.salida_otro_tour}". Elige otra salida.`
                           : <>Servicio: {disp.disponibles_servicio} de {disp.capacidad_servicio} cupos libres.
-                              {disp.info_salida && ` · Vehículo (${disp.info_salida.vehiculo}): ${disp.info_salida.disponibles_vehiculo} de ${disp.info_salida.capacidad_vehiculo} libres.`}</>}
+                              {disp.info_salida && ` · Vehículo (${disp.info_salida.vehiculo}): ${disp.info_salida.disponibles_vehiculo} de ${disp.info_salida.capacidad_vehiculo} libres.`}
+                              {ok && disp.salida_se_creara && ' · Se creará una nueva salida automáticamente para este horario.'}
+                              {ok && !disp.salida_se_creara && !form.id_salida && ' · Se reutilizará la salida existente para ese horario y fecha.'}</>}
                       </p>
                     </div>
                   </div>
