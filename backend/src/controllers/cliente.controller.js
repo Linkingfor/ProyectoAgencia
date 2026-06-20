@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { retrievePaymentIntent, CURRENCY } = require('./stripe.controller');
 
 /* ════════════════════════════════════════════════════
    "Mi cuenta" del cliente (página comercial)
@@ -38,15 +39,14 @@ const misCompras = async (req, res) => {
 
 /* ════════════════════════════════════════════════════
    Compra online — pasarela de pagos
-   (Yape, Plin y transferencia. El pago con tarjeta se
-   integrará en el RFC-003 vía Stripe.)
    ════════════════════════════════════════════════════ */
 
 // POST /api/mi-cuenta/comprar
-//   { id_servicio, fecha_servicio, cantidad_personas, metodo_pago }
+//   { id_servicio, fecha_servicio, cantidad_personas, metodo_pago, payment_intent_id? }
+// Si metodo_pago === 'tarjeta', verifica el pago en Stripe.
 // Crea reserva confirmada + venta + comprobante. Devuelve id_venta y número.
 const comprarOnline = async (req, res) => {
-  const { id_servicio, fecha_servicio, cantidad_personas, metodo_pago } = req.body;
+  const { id_servicio, fecha_servicio, cantidad_personas, metodo_pago, payment_intent_id } = req.body;
   const cant = parseInt(cantidad_personas);
 
   if (!id_servicio || !fecha_servicio || !cant) {
@@ -54,7 +54,7 @@ const comprarOnline = async (req, res) => {
   }
   if (cant < 1) return res.status(400).json({ error: 'La cantidad de personas debe ser al menos 1.' });
 
-  const metodosValidos = ['yape', 'plin', 'transferencia'];
+  const metodosValidos = ['tarjeta', 'yape', 'plin', 'transferencia'];
   if (!metodosValidos.includes(metodo_pago)) {
     return res.status(400).json({ error: 'Método de pago no válido.' });
   }
@@ -88,6 +88,31 @@ const comprarOnline = async (req, res) => {
           ? `TOUR LLENO — No quedan cupos para "${nombreServicio}" el ${fecha_servicio}.`
           : `POCOS CUPOS — Solo quedan ${disponibles} lugares para esa fecha.`
       });
+    }
+
+    // ── Verificar el pago en Stripe (si es tarjeta) ──
+    const totalEsperado = Number(precio) * cant;
+    if (metodo_pago === 'tarjeta') {
+      if (!payment_intent_id) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Falta el identificador del pago de Stripe.' });
+      }
+      let pi;
+      try {
+        pi = await retrievePaymentIntent(payment_intent_id);
+      } catch (e) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'No se pudo verificar el pago en Stripe.' });
+      }
+      if (pi.status !== 'succeeded') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `El pago no fue aprobado (estado: ${pi.status}).` });
+      }
+      const esperadoCents = Math.round(totalEsperado * 100);
+      if (pi.amount !== esperadoCents || pi.currency !== CURRENCY) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'El monto o moneda del pago no coincide con la compra.' });
+      }
     }
 
     // ── Crear reserva (confirmada, origen web) ──

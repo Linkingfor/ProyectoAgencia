@@ -1,16 +1,21 @@
 import { useState, useEffect } from 'react';
 import api from '../services/api';
 import toast from 'react-hot-toast';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { getStripe } from '../services/stripe';
 import {
-  X, Calendar, Users, Smartphone, Building2,
-  CheckCircle2, Lock, ArrowRight, Download, Sparkles
+  X, Calendar, Users, CreditCard, Smartphone, Building2,
+  CheckCircle2, Lock, ArrowRight, Download, Sparkles, ShieldCheck
 } from 'lucide-react';
 
 const METODOS = [
-  { id: 'yape',          label: 'Yape',          icon: Smartphone },
-  { id: 'plin',          label: 'Plin',          icon: Smartphone },
-  { id: 'transferencia', label: 'Transferencia', icon: Building2  },
+  { id: 'tarjeta',       label: 'Tarjeta',       icon: CreditCard, stripe: true  },
+  { id: 'yape',          label: 'Yape',          icon: Smartphone, stripe: false },
+  { id: 'plin',          label: 'Plin',          icon: Smartphone, stripe: false },
+  { id: 'transferencia', label: 'Transferencia', icon: Building2,  stripe: false },
 ];
+
+const stripePromise = getStripe();
 
 async function descargarPdf(id_venta, numero) {
   try {
@@ -27,9 +32,13 @@ export default function Compra({ paquete, onClose }) {
   const [paso, setPaso]     = useState(1);
   const [fecha, setFecha]   = useState('');
   const [cant, setCant]     = useState(2);
-  const [metodo, setMetodo] = useState('yape');
+  const [metodo, setMetodo] = useState('tarjeta');
   const [disp, setDisp]     = useState(null);
   const [comprobante, setComprobante] = useState(null);
+
+  const [clientSecret, setClientSecret] = useState(null);
+  const [piId, setPiId] = useState(null);
+  const [loadingPI, setLoadingPI] = useState(false);
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -38,10 +47,11 @@ export default function Compra({ paquete, onClose }) {
 
   const total = Number(paquete.precio) * cant;
 
-  // solo mostramos info visual; el backend valida de verdad al crear la venta
+  // solo mostramos info visual; el backend valida de verdad al crear el pago
   const verificarDisp = async () => {
     if (!fecha) return toast.error('Selecciona una fecha.');
     if (cant < 1) return toast.error('Mínimo 1 persona.');
+    // El backend valida realmente al crear el PaymentIntent. Aquí solo info visual.
     setDisp({
       disponibles_servicio: paquete.capacidad,
       capacidad_servicio: paquete.capacidad,
@@ -49,7 +59,35 @@ export default function Compra({ paquete, onClose }) {
     });
   };
 
-  const pagar = async () => {
+  // creamos el PaymentIntent de Stripe al entrar al paso de pago con tarjeta
+  useEffect(() => {
+    if (paso === 2 && metodo === 'tarjeta' && !clientSecret && !loadingPI) {
+      setLoadingPI(true);
+      api.post('/mi-cuenta/payment-intent', {
+        id_servicio: paquete.id_servicio, fecha_servicio: fecha, cantidad_personas: cant,
+      })
+        .then(({ data }) => { setClientSecret(data.client_secret); setPiId(data.payment_intent_id); })
+        .catch(err => toast.error(err.response?.data?.error || 'No se pudo iniciar el pago.'))
+        .finally(() => setLoadingPI(false));
+    }
+  }, [paso, metodo]);
+
+  const onStripeSuccess = async () => {
+    try {
+      const { data } = await api.post('/mi-cuenta/comprar', {
+        id_servicio: paquete.id_servicio, fecha_servicio: fecha, cantidad_personas: cant,
+        metodo_pago: 'tarjeta', payment_intent_id: piId,
+      });
+      setComprobante(data);
+      setPaso(3);
+      setTimeout(() => descargarPdf(data.id_venta, data.numero_comprobante), 600);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error al registrar la compra.');
+    }
+  };
+
+  // para Yape, Plin y transferencia vamos directo al backend sin pasar por Stripe
+  const pagarAlternativo = async () => {
     try {
       const { data } = await api.post('/mi-cuenta/comprar', {
         id_servicio: paquete.id_servicio, fecha_servicio: fecha, cantidad_personas: cant,
@@ -91,7 +129,7 @@ export default function Compra({ paquete, onClose }) {
                   <Calendar size={16} className="input-icon" />
                   <input type="date" className="form-input"
                     min={new Date().toISOString().split('T')[0]}
-                    value={fecha} onChange={e => { setFecha(e.target.value); setDisp(null); }} />
+                    value={fecha} onChange={e => { setFecha(e.target.value); setDisp(null); setClientSecret(null); }} />
                 </div>
               </div>
               <div className="form-group">
@@ -99,7 +137,7 @@ export default function Compra({ paquete, onClose }) {
                 <div className="input-wrap">
                   <Users size={16} className="input-icon" />
                   <input type="number" min={1} max={paquete.capacidad} className="form-input"
-                    value={cant} onChange={e => { setCant(parseInt(e.target.value) || 1); setDisp(null); }} />
+                    value={cant} onChange={e => { setCant(parseInt(e.target.value) || 1); setDisp(null); setClientSecret(null); }} />
                 </div>
               </div>
             </div>
@@ -140,24 +178,46 @@ export default function Compra({ paquete, onClose }) {
                 return (
                   <button key={m.id} type="button"
                     className={`cp-metodo ${metodo === m.id ? 'on' : ''}`}
-                    onClick={() => setMetodo(m.id)}>
+                    onClick={() => { setMetodo(m.id); setClientSecret(null); }}>
                     <I size={20} /> {m.label}
                   </button>
                 );
               })}
             </div>
 
-            <div className="cp-wallet">
-              <Smartphone size={36} />
-              <h3>Pago con {METODOS.find(m => m.id === metodo).label}</h3>
-              <p>Demo: al confirmar se generará tu comprobante automáticamente.</p>
-            </div>
-            <div className="cp-actions">
-              <button className="btn btn-outline" onClick={() => setPaso(1)}>Volver</button>
-              <button className="btn btn-primary btn-lg" onClick={pagar} style={{ flex: 1 }}>
-                <Lock size={15} /> Confirmar pago S/ {total.toFixed(2)}
-              </button>
-            </div>
+            {metodo === 'tarjeta' && (
+              <>
+                <div className="cp-stripe-banner">
+                  <ShieldCheck size={16} /> Pago procesado por <strong>Stripe</strong> · cifrado SSL · tu tarjeta nunca pasa por nuestros servidores
+                </div>
+                {loadingPI && (
+                  <div className="loading-screen" style={{ height: 'auto', padding: 32 }}>
+                    <div className="spinner" /><p>Conectando con Stripe...</p>
+                  </div>
+                )}
+                {clientSecret && (
+                  <Elements stripe={stripePromise} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#2563eb', borderRadius: '10px', fontFamily: 'Inter, system-ui' } } }}>
+                    <StripeCardForm total={total} onSuccess={onStripeSuccess} onCancel={() => setPaso(1)} />
+                  </Elements>
+                )}
+              </>
+            )}
+
+            {metodo !== 'tarjeta' && (
+              <>
+                <div className="cp-wallet">
+                  <Smartphone size={36} />
+                  <h3>Pago con {METODOS.find(m => m.id === metodo).label}</h3>
+                  <p>Demo: al confirmar se generará tu comprobante automáticamente.</p>
+                </div>
+                <div className="cp-actions">
+                  <button className="btn btn-outline" onClick={() => setPaso(1)}>Volver</button>
+                  <button className="btn btn-primary btn-lg" onClick={pagarAlternativo} style={{ flex: 1 }}>
+                    <Lock size={15} /> Confirmar pago S/ {total.toFixed(2)}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -259,7 +319,7 @@ export default function Compra({ paquete, onClose }) {
         .cp-resumen .row.total span { color: #0f172a; font-weight: 700; }
         .cp-resumen .row.total strong { color: var(--primary); font-size: 19px; }
 
-        .cp-metodos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .cp-metodos { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
         .cp-metodo {
           padding: 14px 8px; border-radius: var(--r); border: 1.5px solid var(--border);
           background: #fff; cursor: pointer; font-size: 12px; font-weight: 600;
@@ -268,6 +328,13 @@ export default function Compra({ paquete, onClose }) {
         }
         .cp-metodo:hover { border-color: var(--primary-200); }
         .cp-metodo.on { border-color: var(--primary); background: var(--primary-50); color: var(--primary); }
+
+        .cp-stripe-banner {
+          display: flex; align-items: center; gap: 8px;
+          background: linear-gradient(135deg, #635bff, #7a73ff); color: #fff;
+          padding: 10px 14px; border-radius: var(--r); font-size: 12.5px;
+        }
+        .cp-stripe-banner strong { font-weight: 700; }
 
         .cp-wallet {
           padding: 36px 20px; text-align: center; background: var(--bg-soft);
@@ -300,5 +367,49 @@ export default function Compra({ paquete, onClose }) {
         .cp-ok-detalle .row.total strong { color: #059669; font-size: 17px; }
       `}</style>
     </div>
+  );
+}
+
+// formulario de tarjeta - va dentro del proveedor de Stripe
+function StripeCardForm({ total, onSuccess, onCancel }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!stripe || !elements) return;
+    setLoading(true);
+    const { error, paymentIntent } = await stripe.confirmPayment({
+      elements,
+      redirect: 'if_required',
+    });
+    if (error) {
+      toast.error(error.message || 'El pago fue rechazado.');
+      setLoading(false);
+      return;
+    }
+    if (paymentIntent && paymentIntent.status === 'succeeded') {
+      await onSuccess();
+    } else {
+      toast.error('El pago no se pudo completar.');
+    }
+    setLoading(false);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="stripe-form">
+      <PaymentElement options={{ layout: 'tabs' }} />
+      <div className="cp-actions">
+        <button type="button" className="btn btn-outline" onClick={onCancel} disabled={loading}>Volver</button>
+        <button type="submit" className="btn btn-primary btn-lg" disabled={loading || !stripe} style={{ flex: 1 }}>
+          {loading ? 'Procesando...' : <><Lock size={15} /> Pagar S/ {total.toFixed(2)}</>}
+        </button>
+      </div>
+      <style>{`
+        .stripe-form { display: flex; flex-direction: column; gap: 14px; }
+        .stripe-form .StripeElement { padding: 0; }
+      `}</style>
+    </form>
   );
 }
