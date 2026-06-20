@@ -26,7 +26,13 @@ app.use(helmet({
 }));
 
 // CORS restringido al frontend de desarrollo
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'https://proyectoagencia.netlify.app'
+  ],
+  credentials: true
+}));
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
