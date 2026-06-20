@@ -1,0 +1,11 @@
+
+> backend@1.0.0 start
+> node server.js
+
+◇ injected env (11) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+✅ PostgreSQL conectado → 127.0.0.1:5432/agenciaviajes_db
+
+🚀 Servidor corriendo en http://localhost:3001
+📋 API disponible en http://localhost:3001/api
+🌍 Ambiente: development
+
