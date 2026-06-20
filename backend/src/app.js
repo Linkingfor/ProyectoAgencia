@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const authRoutes         = require('./routes/auth.routes');
 const clientesRoutes     = require('./routes/clientes.routes');
@@ -28,7 +29,26 @@ app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// ─── Rate limiters / RFC-007 ────────────────────────────────────────────────
+// General: 300 req / 15 min por IP
+app.use('/api', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiadas solicitudes, intenta más tarde.' }
+}));
 
+// Estricto en logins: bloquea IP tras 5 intentos fallidos por 15 minutos
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos fallidos. Bloqueado 15 minutos.' }
+});
+app.use('/api/auth/login', loginLimiter);
 
 // ─── Rutas ──────────────────────────────────────────────────────────────────
 app.use('/api/auth',         authRoutes);
