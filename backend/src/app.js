@@ -30,7 +30,7 @@ app.use(helmet({
 // del frontend definidas en la variable CORS_ORIGINS (separadas por coma),
 // por ejemplo: CORS_ORIGINS=https://mi-frontend.onrender.com,https://otra.com
 const allowedOrigins = [
-  'https://proyectoagencia.netlify.app/',
+  'https://proyectoagencia.netlify.app',
   'http://localhost:5173',
   'http://localhost:4173',
   ...(process.env.CORS_ORIGINS
