@@ -1,0 +1,64 @@
+# ═══════════════════════════════════════════════════════════════════
+#  Render Blueprint — Agencia de Viajes Ica
+#  En Render:  New +  →  Blueprint  →  conecta este repo.
+#  Render crea la base de datos, el backend y el frontend.
+#  Las variables marcadas "sync: false" las completas tú en el panel
+#  (Stripe, correo y las URLs cruzadas frontend/backend).
+# ═══════════════════════════════════════════════════════════════════
+
+databases:
+  - name: agenciaviajes-db
+    databaseName: agenciaviajes_db
+    plan: free
+
+services:
+  # ─── Backend (API Node/Express) ──────────────────────────────────
+  - type: web
+    name: agenciaviajes-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agenciaviajes-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true          # Render genera una clave segura
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      - key: STRIPE_CURRENCY
+        value: pen
+      - key: EMAIL_FROM_NAME
+        value: Agencia de Viajes Ica
+      - key: STRIPE_SECRET_KEY
+        sync: false                  # ← pégala tú (sk_test_...)
+      - key: EMAIL_USER
+        sync: false                  # ← tu correo Gmail
+      - key: EMAIL_APP_PASSWORD
+        sync: false                  # ← contraseña de aplicación (16 letras)
+      - key: CORS_ORIGINS
+        sync: false                  # ← URL del frontend (https://...onrender.com)
+
+  # ─── Frontend (React/Vite, sitio estático) ───────────────────────
+  - type: web
+    name: agenciaviajes-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false                  # ← https://TU-BACKEND.onrender.com/api
+      - key: VITE_STRIPE_PUBLISHABLE_KEY
+        sync: false                  # ← pk_test_... (clave pública)
+    routes:
+      # React Router: todas las rutas caen en index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html

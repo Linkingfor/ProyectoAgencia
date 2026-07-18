@@ -25,13 +25,24 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },  // permite servir PDFs al frontend
 }));
 
-// CORS restringido al frontend de desarrollo
+// CORS — orígenes permitidos.
+// En local siempre se permite Vite (5173). En producción se agregan las URLs
+// del frontend definidas en la variable CORS_ORIGINS (separadas por coma),
+// por ejemplo: CORS_ORIGINS=https://mi-frontend.onrender.com,https://otra.com
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  ...(process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
+    : []),
+];
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'https://proyectoagencia.netlify.app'
-  ],
-  credentials: true
+  origin: (origin, cb) => {
+    // Permite peticiones sin origin (curl, apps móviles) y las de la lista
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`Origen no permitido por CORS: ${origin}`));
+  },
+  credentials: true,
 }));
 
 app.use(express.json({ limit: '1mb' }));
