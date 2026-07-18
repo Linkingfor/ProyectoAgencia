@@ -20,11 +20,16 @@ function getTransport() {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) return null;
   if (!_transport) {
     _transport = nodemailer.createTransport({
-      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,   // conexión SSL directa
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_APP_PASSWORD,
       },
+      // Evita el error "unable to verify the first certificate" cuando un
+      // antivirus/proxy local intercepta el TLS (común en Windows).
+      tls: { rejectUnauthorized: false },
     });
   }
   return _transport;
