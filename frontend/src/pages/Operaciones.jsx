@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import {
   Plus, Search, Pencil, Trash2, Bus, CalendarCheck, CreditCard,
   Users, Clock, CheckCircle2, XCircle, AlertCircle, MapPin, ArrowRight,
-  Truck, UserPlus, Banknote, Receipt, X, Download, StickyNote
+  Truck, UserPlus, Banknote, Receipt, X, Download, StickyNote, Mail
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
@@ -24,6 +24,17 @@ export async function descargarComprobantePdf(id_venta, numero) {
     toast.success('PDF descargado.');
   } catch {
     toast.error('No se pudo descargar el PDF.');
+  }
+}
+
+// envía el comprobante por correo al cliente (correo opcional para reenviar a otro)
+export async function enviarComprobanteCorreo(id_venta, correo) {
+  const cargando = toast.loading('Enviando comprobante...');
+  try {
+    const { data } = await api.post(`/ventas/${id_venta}/enviar-correo`, correo ? { correo } : {});
+    toast.success(data.mensaje || 'Comprobante enviado.', { id: cargando });
+  } catch (err) {
+    toast.error(err.response?.data?.error || 'No se pudo enviar el correo.', { id: cargando });
   }
 }
 
@@ -912,7 +923,7 @@ export function Pagos() {
       <div className="card">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>ID</th><th>Cliente</th><th>Fecha</th><th>Total</th><th>Método</th><th>Comprobante</th><th>Estado</th><th>PDF</th></tr></thead>
+            <thead><tr><th>ID</th><th>Cliente</th><th>Fecha</th><th>Total</th><th>Método</th><th>Comprobante</th><th>Estado</th><th style={{ textAlign: 'right' }}>Comprobante</th></tr></thead>
             <tbody>
               {filtered.map(v => (
                 <tr key={v.id_venta}>
@@ -931,9 +942,17 @@ export function Pagos() {
                     : <span className="muted">—</span>}</td>
                   <td><span className="badge badge-green"><span className="badge-dot" /> {v.estado}</span></td>
                   <td>
-                    <button className="btn btn-outline btn-sm" onClick={() => descargarComprobantePdf(v.id_venta, v.comprobante_numero)}>
-                      <Download size={13} /> PDF
-                    </button>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button className="btn btn-outline btn-sm" onClick={() => descargarComprobantePdf(v.id_venta, v.comprobante_numero)}>
+                        <Download size={13} /> PDF
+                      </button>
+                      <button
+                        className="btn btn-outline btn-sm"
+                        title={v.cliente_correo ? `Enviar a ${v.cliente_correo}` : 'El cliente no tiene correo registrado'}
+                        onClick={() => enviarComprobanteCorreo(v.id_venta)}>
+                        <Mail size={13} /> Correo
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

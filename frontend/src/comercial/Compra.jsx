@@ -28,6 +28,11 @@ async function descargarPdf(id_venta, numero) {
   } catch {}
 }
 
+// tras la compra, intentamos enviar el comprobante al correo del cliente (silencioso)
+async function autoEnviarCorreo(id_venta) {
+  try { await api.post(`/ventas/${id_venta}/enviar-correo`, {}); } catch {}
+}
+
 export default function Compra({ paquete, onClose }) {
   const [paso, setPaso]     = useState(1);
   const [fecha, setFecha]   = useState('');
@@ -81,6 +86,7 @@ export default function Compra({ paquete, onClose }) {
       setComprobante(data);
       setPaso(3);
       setTimeout(() => descargarPdf(data.id_venta, data.numero_comprobante), 600);
+      autoEnviarCorreo(data.id_venta);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Error al registrar la compra.');
     }
@@ -96,6 +102,7 @@ export default function Compra({ paquete, onClose }) {
       setComprobante(data);
       setPaso(3);
       setTimeout(() => descargarPdf(data.id_venta, data.numero_comprobante), 600);
+      autoEnviarCorreo(data.id_venta);
     } catch (err) {
       toast.error(err.response?.data?.error || 'No se pudo procesar el pago.');
     }

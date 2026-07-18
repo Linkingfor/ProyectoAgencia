@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const PDFDocument = require('pdfkit');
+const { enviarComprobante, correoConfigurado } = require('../utils/mailer');
 
 // GET /api/ventas
 const getAll = async (req, res) => {
@@ -90,35 +91,39 @@ const create = async (req, res) => {
 
 // GET /api/ventas/:id/pdf  → descarga el comprobante en PDF (RFC-004)
 // Permite tanto a trabajadores (intranet) como al cliente dueño de la venta
-const downloadPdf = async (req, res) => {
-  try {
-    const ventaR = await pool.query(`
-      SELECT v.*, c.nombres AS cliente_nombre, c.dni AS cliente_dni,
-             c.correo AS cliente_correo, c.telefono AS cliente_telefono
-      FROM venta v JOIN cliente c ON c.id_cliente = v.id_cliente
-      WHERE v.id_venta = $1
-    `, [req.params.id]);
-    if (ventaR.rows.length === 0) return res.status(404).json({ error: 'Venta no encontrada.' });
-    const venta = ventaR.rows[0];
+// ─── Helpers reutilizables para el comprobante ──────────────────────────────
 
-    // Si quien pide es un cliente, debe ser el dueño
-    if (req.user?.tipo === 'cliente' && req.user.id_cliente !== venta.id_cliente) {
-      return res.status(403).json({ error: 'No tienes permiso para ver este comprobante.' });
-    }
+// Trae venta + detalles + comprobante de una venta. null si no existe.
+async function _datosComprobante(id) {
+  const ventaR = await pool.query(`
+    SELECT v.*, c.nombres AS cliente_nombre, c.dni AS cliente_dni,
+           c.correo AS cliente_correo, c.telefono AS cliente_telefono
+    FROM venta v JOIN cliente c ON c.id_cliente = v.id_cliente
+    WHERE v.id_venta = $1
+  `, [id]);
+  if (ventaR.rows.length === 0) return null;
+  const venta = ventaR.rows[0];
 
-    const detalles = (await pool.query(`
-      SELECT dv.*, s.nombre AS servicio_nombre
-      FROM detalle_venta dv JOIN servicio s ON s.id_servicio = dv.id_servicio
-      WHERE dv.id_venta = $1
-    `, [req.params.id])).rows;
+  const detalles = (await pool.query(`
+    SELECT dv.*, s.nombre AS servicio_nombre
+    FROM detalle_venta dv JOIN servicio s ON s.id_servicio = dv.id_servicio
+    WHERE dv.id_venta = $1
+  `, [id])).rows;
 
-    const compR = (await pool.query('SELECT * FROM comprobante WHERE id_venta = $1', [req.params.id])).rows;
-    const comp = compR[0] || { tipo: 'boleta', numero: `TMP-${req.params.id}`, fecha_emision: venta.fecha };
+  const compR = (await pool.query('SELECT * FROM comprobante WHERE id_venta = $1', [id])).rows;
+  const comp = compR[0] || { tipo: 'boleta', numero: `TMP-${id}`, fecha_emision: venta.fecha };
 
+  return { venta, detalles, comp };
+}
+
+// Dibuja el comprobante y lo devuelve como Buffer (para descargar o adjuntar por correo)
+function _construirPdfBuffer(venta, detalles, comp) {
+  return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${comp.tipo}-${comp.numero}.pdf"`);
-    doc.pipe(res);
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
 
     doc.fillColor('#2563eb').rect(50, 50, 495, 70).fill();
     doc.fillColor('#ffffff').fontSize(22).font('Helvetica-Bold').text('AGENCIA DE VIAJES ICA', 60, 65)
@@ -195,9 +200,67 @@ const downloadPdf = async (req, res) => {
       .text(`Emitido el ${new Date().toLocaleString('es-PE')}`, 50, 792, { width: 495, align: 'center' });
 
     doc.end();
+  });
+}
+
+// ─── Endpoints del comprobante ──────────────────────────────────────────────
+
+// GET /api/ventas/:id/pdf — descarga el comprobante en PDF (RF-07)
+const downloadPdf = async (req, res) => {
+  try {
+    const datos = await _datosComprobante(req.params.id);
+    if (!datos) return res.status(404).json({ error: 'Venta no encontrada.' });
+
+    // Un cliente solo puede descargar su propio comprobante
+    if (req.user?.tipo === 'cliente' && req.user.id_cliente !== datos.venta.id_cliente) {
+      return res.status(403).json({ error: 'No tienes permiso para ver este comprobante.' });
+    }
+
+    const buffer = await _construirPdfBuffer(datos.venta, datos.detalles, datos.comp);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${datos.comp.tipo}-${datos.comp.numero}.pdf"`);
+    res.send(buffer);
   } catch (err) {
     if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 };
 
-module.exports = { getAll, getById, create, downloadPdf };
+// POST /api/ventas/:id/enviar-correo — envía el comprobante por correo al cliente
+// Body opcional: { correo } para enviar a un correo distinto al registrado.
+const enviarCorreo = async (req, res) => {
+  try {
+    const datos = await _datosComprobante(req.params.id);
+    if (!datos) return res.status(404).json({ error: 'Venta no encontrada.' });
+
+    // Un cliente solo puede enviar su propio comprobante
+    if (req.user?.tipo === 'cliente' && req.user.id_cliente !== datos.venta.id_cliente) {
+      return res.status(403).json({ error: 'No tienes permiso para enviar este comprobante.' });
+    }
+
+    const destino = (req.body?.correo || datos.venta.cliente_correo || '').trim();
+    if (!destino) {
+      return res.status(400).json({ error: 'El cliente no tiene un correo registrado. Indica un correo destino.' });
+    }
+
+    const buffer = await _construirPdfBuffer(datos.venta, datos.detalles, datos.comp);
+    await enviarComprobante({
+      to: destino,
+      nombre: datos.venta.cliente_nombre,
+      tipo: datos.comp.tipo,
+      numero: datos.comp.numero,
+      total: datos.venta.total,
+      pdfBuffer: buffer,
+    });
+
+    res.json({ mensaje: `Comprobante enviado a ${destino}.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// GET /api/ventas/correo/estado — indica si el envío por correo está configurado
+const estadoCorreo = (req, res) => {
+  res.json({ configurado: correoConfigurado() });
+};
+
+module.exports = { getAll, getById, create, downloadPdf, enviarCorreo, estadoCorreo };

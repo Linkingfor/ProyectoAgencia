@@ -7,6 +7,7 @@ import {
   User, IdCard, Mail, Phone, Compass, Calendar, Sparkles, ArrowRight,
   Download, Receipt, CheckCircle2, Clock, XCircle, MapPin
 } from 'lucide-react';
+// (Mail ya viene importado arriba y se reutiliza para el botón de correo)
 
 const estadoR = {
   pendiente:  { cls: 'badge-yellow', label: 'Pendiente',  Icon: Clock },
@@ -24,6 +25,17 @@ async function descargarPdf(id_venta, numero) {
     window.URL.revokeObjectURL(url);
     toast.success('Comprobante descargado.');
   } catch { toast.error('No se pudo descargar el comprobante.'); }
+}
+
+// el cliente se envía a sí mismo el comprobante por correo
+async function enviarCorreo(id_venta) {
+  const cargando = toast.loading('Enviando a tu correo...');
+  try {
+    const { data } = await api.post(`/ventas/${id_venta}/enviar-correo`, {});
+    toast.success(data.mensaje || 'Comprobante enviado.', { id: cargando });
+  } catch (err) {
+    toast.error(err.response?.data?.error || 'No se pudo enviar el correo.', { id: cargando });
+  }
 }
 
 export default function MiCuenta() {
@@ -151,9 +163,14 @@ export default function MiCuenta() {
                       <td><strong>S/ {Number(v.total).toFixed(2)}</strong></td>
                       <td><span className="badge badge-green"><CheckCircle2 size={11} /> {v.estado}</span></td>
                       <td>
-                        <button className="btn btn-primary btn-sm" onClick={() => descargarPdf(v.id_venta, v.comprobante_numero)}>
-                          <Download size={13} /> PDF
-                        </button>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <button className="btn btn-primary btn-sm" onClick={() => descargarPdf(v.id_venta, v.comprobante_numero)}>
+                            <Download size={13} /> PDF
+                          </button>
+                          <button className="btn btn-outline btn-sm" onClick={() => enviarCorreo(v.id_venta)}>
+                            <Mail size={13} /> Correo
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

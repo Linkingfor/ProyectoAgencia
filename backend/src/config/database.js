@@ -16,8 +16,8 @@ if (!connectionString) {
 const pool = new Pool({
   connectionString,
   ssl: process.env.NODE_ENV === 'production'
-    ? { rejectUnauthorized: false }
-    : { rejectUnauthorized: false },
+    ? { rejectUnauthorized: false }   // Render exige SSL en producción
+    : false,                          // Postgres local no usa SSL
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
