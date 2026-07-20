@@ -254,9 +254,12 @@ const enviarCorreo = async (req, res) => {
 
     res.json({ mensaje: `Comprobante enviado a ${destino}.` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
+  console.error('ERROR EN enviarCorreo:', err);
+  res.status(500).json({
+    error: 'No se pudo enviar la boleta.',
+    detalle: err.message
+  });
+}
 
 // GET /api/ventas/correo/estado — indica si el envío por correo está configurado
 const estadoCorreo = (req, res) => {
