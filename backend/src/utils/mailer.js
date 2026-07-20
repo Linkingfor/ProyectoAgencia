@@ -1,4 +1,4 @@
-h/* ════════════════════════════════════════════════════
+/* ════════════════════════════════════════════════════
    mailer.js — Envío de correos (Gmail)
    ════════════════════════════════════════════════════
    Usa nodemailer con una cuenta Gmail. Las credenciales van en .env:
