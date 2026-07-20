@@ -1,4 +1,4 @@
-/* ════════════════════════════════════════════════════
+h/* ════════════════════════════════════════════════════
    mailer.js — Envío de correos (Gmail)
    ════════════════════════════════════════════════════
    Usa nodemailer con una cuenta Gmail. Las credenciales van en .env:
@@ -19,18 +19,17 @@ let _transport = null;
 function getTransport() {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) return null;
   if (!_transport) {
-    _transport = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,   // conexión SSL directa
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_APP_PASSWORD,
-      },
-      // Evita el error "unable to verify the first certificate" cuando un
-      // antivirus/proxy local intercepta el TLS (común en Windows).
-      tls: { rejectUnauthorized: false },
-    });
+   _transport = nodemailer.createTransport({
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
+  family: 4,   // ← fuerza IPv4, evita el ENETUNREACH por IPv6
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_APP_PASSWORD,
+  },
+  tls: { rejectUnauthorized: false },
+});
   }
   return _transport;
 }
