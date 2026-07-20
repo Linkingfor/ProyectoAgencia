@@ -19,6 +19,8 @@ const horarioRoutes = require('./routes/horario.routes');
 
 const app = express();
 
+
+app.set('trust proxy', 1);
 // ─── Seguridad / RNF-01 ────────────────────────────────────────────────────
 // helmet: cabeceras de seguridad HTTP (XSS, clickjacking, sniffing, etc.)
 app.use(helmet({
