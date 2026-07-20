@@ -232,7 +232,6 @@ const enviarCorreo = async (req, res) => {
     const datos = await _datosComprobante(req.params.id);
     if (!datos) return res.status(404).json({ error: 'Venta no encontrada.' });
 
-    // Un cliente solo puede enviar su propio comprobante
     if (req.user?.tipo === 'cliente' && req.user.id_cliente !== datos.venta.id_cliente) {
       return res.status(403).json({ error: 'No tienes permiso para enviar este comprobante.' });
     }
@@ -243,6 +242,7 @@ const enviarCorreo = async (req, res) => {
     }
 
     const buffer = await _construirPdfBuffer(datos.venta, datos.detalles, datos.comp);
+
     await enviarComprobante({
       to: destino,
       nombre: datos.venta.cliente_nombre,
@@ -252,14 +252,15 @@ const enviarCorreo = async (req, res) => {
       pdfBuffer: buffer,
     });
 
-    res.json({ mensaje: `Comprobante enviado a ${destino}.` });
+    return res.json({ mensaje: `Comprobante enviado a ${destino}.` });
   } catch (err) {
-  console.error('ERROR EN enviarCorreo:', err);
-  res.status(500).json({
-    error: 'No se pudo enviar la boleta.',
-    detalle: err.message
-  });
-}
+    console.error('ERROR EN enviarCorreo:', err);
+    return res.status(500).json({
+      error: 'No se pudo enviar la boleta.',
+      detalle: err.message
+    });
+  }
+};
 
 // GET /api/ventas/correo/estado — indica si el envío por correo está configurado
 const estadoCorreo = (req, res) => {
