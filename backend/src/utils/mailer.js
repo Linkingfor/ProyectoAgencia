@@ -1,43 +1,26 @@
 /* ════════════════════════════════════════════════════
-   mailer.js — Envío de correos (Gmail)
+   mailer.js — Envío de correos (Resend)
    ════════════════════════════════════════════════════
-   Usa nodemailer con una cuenta Gmail. Las credenciales van en .env:
-     EMAIL_USER          = tucorreo@gmail.com
-     EMAIL_APP_PASSWORD  = contraseña de aplicación de 16 dígitos
-     EMAIL_FROM_NAME     = nombre que aparece como remitente
-
-   Si no están configuradas, correoConfigurado() devuelve false y el
-   resto del sistema sigue funcionando (el envío simplemente se avisa
-   como no disponible, sin romper nada).
+   Usa la API de Resend (HTTP, no SMTP) — evita el bloqueo de
+   puertos SMTP en el plan gratuito de Render.
+   Variables en .env / Render:
+     RESEND_API_KEY   = re_xxxxxxxxxxxx
+     EMAIL_FROM       = onboarding@resend.dev (o tu dominio verificado)
+     EMAIL_FROM_NAME  = nombre que aparece como remitente
    ════════════════════════════════════════════════════ */
 
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-let _transport = null;
+let _resend = null;
 
-// Crea (una sola vez) el transporte de Gmail, si hay credenciales
-function getTransport() {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) return null;
-  if (!_transport) {
-   _transport = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  family: 4,   // ← fuerza IPv4, evita el ENETUNREACH por IPv6
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASSWORD,
-  },
-  tls: { rejectUnauthorized: false },
-});
-  }
-  return _transport;
+function getClient() {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
 }
 
-// ¿El correo está configurado en el .env?
-const correoConfigurado = () => !!getTransport();
+const correoConfigurado = () => !!getClient();
 
-// Plantilla HTML del correo del comprobante
 function plantillaComprobante({ nombre, tipo, numero, total }) {
   const tituloDoc = tipo === 'factura' ? 'factura' : 'boleta';
   return `
@@ -82,22 +65,26 @@ function plantillaComprobante({ nombre, tipo, numero, total }) {
  * @param {Buffer} p.pdfBuffer   el PDF en memoria
  */
 async function enviarComprobante({ to, nombre, tipo, numero, total, pdfBuffer }) {
-  const transport = getTransport();
-  if (!transport) {
-    throw new Error('El correo no está configurado. Agrega EMAIL_USER y EMAIL_APP_PASSWORD en el archivo .env del backend.');
+  const resend = getClient();
+  if (!resend) {
+    throw new Error('El correo no está configurado. Agrega RESEND_API_KEY en las variables de entorno del backend.');
   }
   if (!to) throw new Error('El cliente no tiene un correo registrado.');
 
   const fromName = process.env.EMAIL_FROM_NAME || 'Agencia de Viajes Ica';
-  await transport.sendMail({
-    from: `"${fromName}" <${process.env.EMAIL_USER}>`,
+  const fromAddress = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+
+  const { error } = await resend.emails.send({
+    from: `${fromName} <${fromAddress}>`,
     to,
     subject: `${tipo === 'factura' ? 'Factura' : 'Boleta'} ${numero} — Agencia de Viajes Ica`,
     html: plantillaComprobante({ nombre, tipo, numero, total }),
     attachments: [
-      { filename: `${tipo}-${numero}.pdf`, content: pdfBuffer, contentType: 'application/pdf' },
+      { filename: `${tipo}-${numero}.pdf`, content: pdfBuffer },
     ],
   });
+
+  if (error) throw new Error(error.message || 'No se pudo enviar el correo con Resend.');
 }
 
 module.exports = { enviarComprobante, correoConfigurado };
